@@ -12,7 +12,7 @@
 
 ---
 
-## 项目简介 / Introduction
+## 简介
 
 C.A.S.S.I.E Sentence Builder 是一个基于 **C#、WinForms、NAudio** 的语音拼接器，  
 可将多个单词的 `.ogg` 音频拼接成完整的语音句子，支持语速、音高、混响、延迟、提前播放等参数调节。  
