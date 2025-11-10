@@ -10,7 +10,7 @@ namespace C.A.S.S.I.E
     public static class OggSentenceBuilder
     {
         public static void BuildSentence(
-            string folder,
+            string folderOrArchive,
             string[] words,
             string outputPath,
             float gapMs,
@@ -24,19 +24,28 @@ namespace C.A.S.S.I.E
             if (words == null || words.Length == 0)
                 throw new ArgumentException("words 不能为空");
 
-            if (!Directory.Exists(folder))
-                throw new DirectoryNotFoundException(folder);
+            if (string.IsNullOrWhiteSpace(folderOrArchive))
+                throw new ArgumentException("路径不能为空。", nameof(folderOrArchive));
+
+            bool isArchive = InMemoryOggDataArchive.IsDataArchive(folderOrArchive);
+            if (!isArchive && !Directory.Exists(folderOrArchive))
+                throw new DirectoryNotFoundException(folderOrArchive);
+
+            Dictionary<string, byte[]> archive = isArchive
+                ? InMemoryOggDataArchive.GetArchive(folderOrArchive)
+                : null;
 
             WaveFormat baseFormat;
             float[] speechSamples = BuildSentenceToFloatArray(
-                folder, words, gapMs, overlapMs, speed, pitchSemitones, out baseFormat);
+                folderOrArchive, archive, words, gapMs, overlapMs, speed, pitchSemitones, out baseFormat);
 
             if (baseFormat == null)
                 throw new InvalidOperationException("没有正确加载任何 OGG 文件。");
 
             double totalSeconds;
-            float[] finalSamples = MixWithBackground(
-                folder, speechSamples, baseFormat, voiceDelayMs, enableBackground, out totalSeconds);
+            float[] finalSamples = archive != null
+                ? MixWithBackgroundFromArchive(archive, speechSamples, baseFormat, voiceDelayMs, enableBackground, out totalSeconds)
+                : MixWithBackground(folderOrArchive, speechSamples, baseFormat, voiceDelayMs, enableBackground, out totalSeconds);
 
             float[] withReverb = ApplyReverbTail(finalSamples, baseFormat, reverbLevel);
 
@@ -55,7 +64,7 @@ namespace C.A.S.S.I.E
         }
 
         public static void BuildSentence(
-            string folder,
+            string folderOrArchive,
             string[] words,
             Stream outputStream,
             float gapMs,
@@ -69,19 +78,28 @@ namespace C.A.S.S.I.E
             if (words == null || words.Length == 0)
                 throw new ArgumentException("单词列表为空。");
 
-            if (!Directory.Exists(folder))
-                throw new DirectoryNotFoundException(folder);
+            if (string.IsNullOrWhiteSpace(folderOrArchive))
+                throw new ArgumentException("路径不能为空。", nameof(folderOrArchive));
+
+            bool isArchive = InMemoryOggDataArchive.IsDataArchive(folderOrArchive);
+            if (!isArchive && !Directory.Exists(folderOrArchive))
+                throw new DirectoryNotFoundException(folderOrArchive);
+
+            Dictionary<string, byte[]> archive = isArchive
+                ? InMemoryOggDataArchive.GetArchive(folderOrArchive)
+                : null;
 
             WaveFormat baseFormat;
             float[] speechSamples = BuildSentenceToFloatArray(
-                folder, words, gapMs, overlapMs, speed, pitchSemitones, out baseFormat);
+                folderOrArchive, archive, words, gapMs, overlapMs, speed, pitchSemitones, out baseFormat);
 
             if (baseFormat == null)
                 throw new InvalidOperationException("没有正确加载任何 OGG 文件。");
 
             double totalSeconds;
-            float[] finalSamples = MixWithBackground(
-                folder, speechSamples, baseFormat, voiceDelayMs, enableBackground, out totalSeconds);
+            float[] finalSamples = archive != null
+                ? MixWithBackgroundFromArchive(archive, speechSamples, baseFormat, voiceDelayMs, enableBackground, out totalSeconds)
+                : MixWithBackground(folderOrArchive, speechSamples, baseFormat, voiceDelayMs, enableBackground, out totalSeconds);
 
             float[] withReverb = ApplyReverbTail(finalSamples, baseFormat, reverbLevel);
 
@@ -98,7 +116,8 @@ namespace C.A.S.S.I.E
         }
 
         private static float[] BuildSentenceToFloatArray(
-            string folder,
+            string folderOrArchive,
+            Dictionary<string, byte[]> archive,
             string[] words,
             float gapMs,
             float overlapMs,
@@ -124,12 +143,30 @@ namespace C.A.S.S.I.E
             for (int w = 0; w < words.Length; w++)
             {
                 string fileName = words[w] + ".ogg";
-                string path = Path.Combine(folder, fileName);
 
-                if (!File.Exists(path))
-                    throw new FileNotFoundException("找不到单词音频: " + path);
+                float[] wordSamples;
+                WaveFormat format;
+                TimeSpan duration;
 
-                float[] wordSamples = LoadOggToFloatArray(path, out WaveFormat format, out TimeSpan duration);
+                if (archive != null)
+                {
+                    if (!InMemoryOggDataArchive.TryOpenOgg(archive, fileName, out var ms))
+                        throw new FileNotFoundException("在 .data 资源包中找不到单词音频: " + fileName);
+
+                    using (ms)
+                    {
+                        wordSamples = LoadOggToFloatArray(ms, out format, out duration);
+                    }
+                }
+                else
+                {
+                    string path = Path.Combine(folderOrArchive, fileName);
+
+                    if (!File.Exists(path))
+                        throw new FileNotFoundException("找不到单词音频: " + path);
+
+                    wordSamples = LoadOggToFloatArray(path, out format, out duration);
+                }
 
                 if (baseFormat == null)
                 {
@@ -215,8 +252,98 @@ namespace C.A.S.S.I.E
             if (bgFormat.SampleRate != sampleRate || bgFormat.Channels != channels)
             {
                 throw new InvalidOperationException(
-                    $"BG 文件 {Path.GetFileName(bgPath)} 的格式与语音不一致。BG: " +
-                    $"{bgFormat.SampleRate}Hz/{bgFormat.Channels}ch, " +
+                    $"背景音频格式与语音不一致，" +
+                    $"背景: {bgFormat.SampleRate}Hz/{bgFormat.Channels}ch, " +
+                    $"语音: {sampleRate}Hz/{channels}ch");
+            }
+
+            int delaySamples = delaySamplesOnly;
+            int totalSamples = Math.Max(bgSamples.Length, speechSamples.Length + delaySamples);
+
+            float[] mixed = new float[totalSamples];
+
+            int bgLen = Math.Min(bgSamples.Length, totalSamples);
+            for (int i = 0; i < bgLen; i++)
+            {
+                mixed[i] = bgSamples[i];
+            }
+
+            for (int i = 0; i < speechSamples.Length; i++)
+            {
+                int idx = i + delaySamples;
+                if (idx >= totalSamples) break;
+
+                float v = mixed[idx] + speechSamples[i];
+                if (v > 1f) v = 1f;
+                else if (v < -1f) v = -1f;
+                mixed[idx] = v;
+            }
+
+            return mixed;
+        }
+
+        private static float[] MixWithBackgroundFromArchive(
+            Dictionary<string, byte[]> archive,
+            float[] speechSamples,
+            WaveFormat baseFormat,
+            float voiceDelayMs,
+            bool enableBackground,
+            out double totalSeconds)
+        {
+            int sampleRate = baseFormat.SampleRate;
+            int channels = baseFormat.Channels;
+
+            if (sampleRate <= 0 || channels <= 0)
+                throw new InvalidOperationException("基础格式不正确。");
+
+            double speechSeconds = (double)speechSamples.Length / (sampleRate * channels);
+            if (speechSeconds < 0) speechSeconds = 0;
+
+            if (voiceDelayMs < 0) voiceDelayMs = 0;
+            double total = speechSeconds + voiceDelayMs / 1000.0;
+            if (total <= 0) total = speechSeconds;
+            if (total <= 0) total = 4.0;
+
+            totalSeconds = total;
+
+            int delaySamplesOnly = (int)(voiceDelayMs / 1000.0 * sampleRate * channels);
+
+            if (!enableBackground)
+            {
+                float[] result = new float[delaySamplesOnly + speechSamples.Length];
+                Array.Copy(speechSamples, 0, result, delaySamplesOnly, speechSamples.Length);
+                return result;
+            }
+
+            string bgKey = SelectBgFileFromArchive(archive, total);
+            if (bgKey == null)
+            {
+                float[] result = new float[delaySamplesOnly + speechSamples.Length];
+                Array.Copy(speechSamples, 0, result, delaySamplesOnly, speechSamples.Length);
+                return result;
+            }
+
+            float[] bgSamples;
+            WaveFormat bgFormat;
+            TimeSpan bgDuration;
+
+            if (!InMemoryOggDataArchive.TryOpenOgg(archive, bgKey, out var bgStream))
+            {
+                float[] result = new float[delaySamplesOnly + speechSamples.Length];
+                Array.Copy(speechSamples, 0, result, delaySamplesOnly, speechSamples.Length);
+                return result;
+            }
+
+            using (bgStream)
+            {
+                bgSamples = LoadOggToFloatArray(bgStream, out bgFormat, out bgDuration);
+            }
+
+            if (bgFormat.SampleRate != sampleRate || bgFormat.Channels != channels)
+            {
+                throw new InvalidOperationException(
+                    $"背景音频格式与语音不一致，" +
+                    $"背景: {bgFormat.SampleRate}Hz/{bgFormat.Channels}ch, " +
                     $"语音: {sampleRate}Hz/{channels}ch");
             }
 
@@ -280,6 +407,38 @@ namespace C.A.S.S.I.E
             return bestPath;
         }
 
+        private static string SelectBgFileFromArchive(Dictionary<string, byte[]> archive, double totalSeconds)
+        {
+            var candidates = InMemoryOggDataArchive.ListBackgroundCandidates(archive);
+            if (candidates.Count == 0)
+                return null;
+
+            int target = (int)Math.Ceiling(totalSeconds);
+            if (target < 4) target = 4;
+            if (target > 40) target = 40;
+
+            string bestKey = null;
+            double bestDiff = double.MaxValue;
+
+            foreach (var key in candidates)
+            {
+                string name = Path.GetFileNameWithoutExtension(key);
+                var parts = name.Split('_');
+                if (parts.Length < 2) continue;
+                if (!int.TryParse(parts[1], out int sec)) continue;
+
+                double diff = Math.Abs(sec - totalSeconds);
+                if (diff < bestDiff)
+                {
+                    bestDiff = diff;
+                    bestKey = key;
+                }
+            }
+
+            return bestKey;
+        }
+
+
         private static float[] LoadOggToFloatArray(
             string path,
             out WaveFormat format,
@@ -308,11 +467,45 @@ namespace C.A.S.S.I.E
             }
         }
 
+        private static float[] LoadOggToFloatArray(
+            Stream source,
+            out WaveFormat format,
+            out TimeSpan duration)
+        {
+            using (var vorbisReader = new VorbisWaveReader(source))
+            {
+                format = vorbisReader.WaveFormat;
+                duration = vorbisReader.TotalTime;
+
+                ISampleProvider sampleProvider = vorbisReader.ToSampleProvider();
+
+                List<float> samples = new List<float>();
+                float[] buffer = new float[format.SampleRate * format.Channels];
+
+                while (true)
+                {
+                    int read = sampleProvider.Read(buffer, 0, buffer.Length);
+                    if (read <= 0) break;
+
+                    for (int i = 0; i < read; i++)
+                        samples.Add(buffer[i]);
+                }
+
+                return samples.ToArray();
+            }
+        }
+
         private static float[] Resample(float[] input, double factor)
         {
-            if (factor <= 0.0) factor = 1.0;
+            if (factor <= 0.0001)
+                factor = 1.0;
+
+            if (Math.Abs(factor - 1.0) < 0.0001)
+                return (float[])input.Clone();
+
             int inLen = input.Length;
-            if (inLen == 0) return input;
+            if (inLen <= 1)
+                return (float[])input.Clone();
 
             int outLen = (int)(inLen / factor);
             if (outLen <= 1) outLen = 1;
@@ -345,58 +538,40 @@ namespace C.A.S.S.I.E
 
             int sampleRate = format.SampleRate;
             int channels = format.Channels;
-            int inLen = input.Length;
 
-            float levelNorm = Math.Max(0f, Math.Min(1f, reverbLevel / 24f));
+            int reverbSamples = (int)(sampleRate * channels);
+            float[] output = new float[input.Length + reverbSamples];
 
-            float wet = 0.1f + 0.5f * levelNorm;
-            float decayBase = 0.4f + 0.5f * levelNorm;
+            Array.Copy(input, output, input.Length);
 
-            float tailSeconds = 0.5f + 2.5f * levelNorm;
-            int tailSamples = (int)(tailSeconds * sampleRate * channels);
+            float baseAmp = Math.Min(1f, reverbLevel / 100f);
 
-            int outLen = inLen + tailSamples;
-            float[] output = new float[outLen];
-
-            Array.Copy(input, output, inLen);
-
-            int delay1 = (int)(0.060 * sampleRate) * channels;
-            int delay2 = (int)(0.095 * sampleRate) * channels;
-            int delay3 = (int)(0.140 * sampleRate) * channels;
-
-            for (int n = 0; n < inLen; n++)
+            for (int i = 0; i < input.Length; i++)
             {
-                float x = input[n];
-                if (Math.Abs(x) < 1e-6f) continue;
+                float sample = input[i] * baseAmp;
+                int idx1 = i + (int)(0.08 * sampleRate * channels);
+                int idx2 = i + (int)(0.16 * sampleRate * channels);
+                int idx3 = i + (int)(0.24 * sampleRate * channels);
 
-                double t = (double)n / (sampleRate * channels);
-                float decay = (float)Math.Pow(decayBase, t * 2.0);
-
-                float baseAmp = wet * decay * x;
-
-                int idx1 = n + delay1;
-                int idx2 = n + delay2;
-                int idx3 = n + delay3;
-
-                if (idx1 < outLen)
+                if (idx1 < output.Length)
                 {
-                    float v = output[idx1] + baseAmp * 0.8f;
+                    float v = output[idx1] + sample * 0.5f;
                     if (v > 1f) v = 1f;
                     else if (v < -1f) v = -1f;
                     output[idx1] = v;
                 }
 
-                if (idx2 < outLen)
+                if (idx2 < output.Length)
                 {
-                    float v = output[idx2] + baseAmp * 0.6f;
+                    float v = output[idx2] + sample * 0.3f;
                     if (v > 1f) v = 1f;
                     else if (v < -1f) v = -1f;
                     output[idx2] = v;
                 }
 
-                if (idx3 < outLen)
+                if (idx3 < output.Length)
                 {
-                    float v = output[idx3] + baseAmp * 0.5f;
+                    float v = output[idx3] + sample * 0.15f;
                     if (v > 1f) v = 1f;
                     else if (v < -1f) v = -1f;
                     output[idx3] = v;

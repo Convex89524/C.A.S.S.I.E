@@ -80,8 +80,8 @@ namespace C.A.S.S.I.E
                 BackColor = Color.FromArgb(40, 40, 40)
             };
 
-            // 左侧：文件夹 + 列表
-            var lblFolder = new Label { Text = "OGG 文件夹", Left = 10, Top = 15, AutoSize = true };
+            // 左侧：文件夹/归档 + 列表
+            var lblFolder = new Label { Text = "OGG 文件夹或 .data 资源包", Left = 10, Top = 15, AutoSize = true };
             txtFolder = new TextBox
             {
                 Left = 10,
@@ -257,14 +257,13 @@ namespace C.A.S.S.I.E
 
         private void BtnBrowseFolder_Click(object sender, EventArgs e)
         {
-            using (var fbd = new FolderBrowserDialog())
+            using (var ofd = new OpenFileDialog())
             {
-                if (Directory.Exists(txtFolder.Text))
-                    fbd.SelectedPath = txtFolder.Text;
-
-                if (fbd.ShowDialog() == DialogResult.OK)
+                ofd.Filter = ".data 资源包|*.data|文件夹|*.*";
+                ofd.Title = "选择 OGG 文件夹 或 .data 资源包";
+                if (ofd.ShowDialog() == DialogResult.OK)
                 {
-                    txtFolder.Text = fbd.SelectedPath;
+                    txtFolder.Text = ofd.FileName;
                     LoadWordList();
                 }
             }
@@ -281,19 +280,35 @@ namespace C.A.S.S.I.E
 
             if (string.IsNullOrWhiteSpace(txtFolder.Text))
             {
-                MessageBox.Show("请先选择 OGG 文件夹。");
+                MessageBox.Show("请先选择 OGG 文件夹或 .data 资源包。");
                 return;
             }
 
             try
             {
-                var words = WordListService.LoadWords(txtFolder.Text);
+                string path = txtFolder.Text.Trim();
+
+                if (File.Exists(path))
+                {
+                    if (!string.Equals(Path.GetExtension(path), ".data", StringComparison.OrdinalIgnoreCase))
+                    {
+                        MessageBox.Show("请选择一个 .data 资源包，或选择一个包含 .ogg 的文件夹。");
+                        return;
+                    }
+                }
+                else if (!Directory.Exists(path))
+                {
+                    MessageBox.Show("指定路径不存在，请检查。");
+                    return;
+                }
+
+                var words = WordListService.LoadWords(path);
                 foreach (var w in words)
                 {
                     lstAvailableWords.Items.Add(w);
                 }
 
-                lblStatus.Text = $"已加载 {lstAvailableWords.Items.Count} 个文件。";
+                lblStatus.Text = $"已加载 {lstAvailableWords.Items.Count} 个单词（来自 {Path.GetFileName(path)}）。";
             }
             catch (Exception ex)
             {
@@ -379,10 +394,16 @@ namespace C.A.S.S.I.E
                 return;
             }
 
-            var folder = txtFolder.Text;
-            if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+            var folderOrArchive = txtFolder.Text;
+            if (string.IsNullOrWhiteSpace(folderOrArchive))
             {
-                MessageBox.Show("OGG 文件夹不存在。");
+                MessageBox.Show("请先指定 OGG 文件夹或 .data 资源包。");
+                return;
+            }
+
+            if (!Directory.Exists(folderOrArchive) && !(File.Exists(folderOrArchive) && string.Equals(Path.GetExtension(folderOrArchive), ".data", StringComparison.OrdinalIgnoreCase)))
+            {
+                MessageBox.Show("指定的 OGG 文件夹或 .data 包不存在。");
                 return;
             }
 
@@ -393,7 +414,7 @@ namespace C.A.S.S.I.E
 
             try
             {
-                await SentenceService.GenerateToFileAsync(folder, words, txtOutput.Text, options);
+                await SentenceService.GenerateToFileAsync(folderOrArchive, words, txtOutput.Text, options);
                 lblStatus.Text = "生成完成，可播放或查看文件。";
             }
             catch (Exception ex)
@@ -416,10 +437,16 @@ namespace C.A.S.S.I.E
                 return;
             }
 
-            var folder = txtFolder.Text;
-            if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+            var folderOrArchive = txtFolder.Text;
+            if (string.IsNullOrWhiteSpace(folderOrArchive))
             {
-                MessageBox.Show("OGG 文件夹不存在。");
+                MessageBox.Show("请先指定 OGG 文件夹或 .data 资源包。");
+                return;
+            }
+
+            if (!Directory.Exists(folderOrArchive) && !(File.Exists(folderOrArchive) && string.Equals(Path.GetExtension(folderOrArchive), ".data", StringComparison.OrdinalIgnoreCase)))
+            {
+                MessageBox.Show("指定的 OGG 文件夹或 .data 包不存在。");
                 return;
             }
 
@@ -431,7 +458,7 @@ namespace C.A.S.S.I.E
             try
             {
                 _previewAudio?.Dispose();
-                _previewAudio = await SentenceService.GenerateToMemoryAsync(folder, words, options);
+                _previewAudio = await SentenceService.GenerateToMemoryAsync(folderOrArchive, words, options);
                 lblStatus.Text = "预生成完成，可直接播放。";
             }
             catch (Exception ex)
@@ -524,9 +551,12 @@ namespace C.A.S.S.I.E
             if (cfg.EnableBackground.HasValue)
                 chkEnableBackground.Checked = cfg.EnableBackground.Value;
 
-            if (!string.IsNullOrWhiteSpace(txtFolder.Text) && Directory.Exists(txtFolder.Text))
+            if (!string.IsNullOrWhiteSpace(txtFolder.Text))
             {
-                LoadWordList();
+                if (Directory.Exists(txtFolder.Text) || (File.Exists(txtFolder.Text) && string.Equals(Path.GetExtension(txtFolder.Text), ".data", StringComparison.OrdinalIgnoreCase)))
+                {
+                    LoadWordList();
+                }
             }
         }
 

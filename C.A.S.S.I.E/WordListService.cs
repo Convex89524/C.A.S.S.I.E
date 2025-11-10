@@ -7,15 +7,20 @@ namespace C.A.S.S.I.E
 {
     public static class WordListService
     {
-        public static IReadOnlyList<string> LoadWords(string folderPath)
+        public static IReadOnlyList<string> LoadWords(string folderOrArchivePath)
         {
-            if (string.IsNullOrWhiteSpace(folderPath))
-                throw new ArgumentException("文件夹路径不能为空。", nameof(folderPath));
+            if (string.IsNullOrWhiteSpace(folderOrArchivePath))
+                throw new ArgumentException("路径不能为空。", nameof(folderOrArchivePath));
 
-            if (!Directory.Exists(folderPath))
-                throw new DirectoryNotFoundException($"文件夹不存在：{folderPath}");
+            if (InMemoryOggDataArchive.IsDataArchive(folderOrArchivePath))
+            {
+                return InMemoryOggDataArchive.ListWordNames(folderOrArchivePath);
+            }
 
-            var words = Directory.GetFiles(folderPath, "*.ogg")
+            if (!Directory.Exists(folderOrArchivePath))
+                throw new DirectoryNotFoundException($"文件夹不存在：{folderOrArchivePath}");
+
+            var words = Directory.GetFiles(folderOrArchivePath, "*.ogg")
                 .Select(Path.GetFileNameWithoutExtension)
                 .Where(n => !string.IsNullOrWhiteSpace(n))
                 .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
