@@ -1,7 +1,7 @@
 # C.A.S.S.I.E Sentence Builder
 
 > **A modern, modular voice concatenation tool inspired by the C.A.S.S.I.E. system in _SCP: Secret Laboratory_.**  
-> **基于《SCP: Secret Laboratory》C.A.S.S.I.E. 语音系统的现代语音拼接工具。**
+> **基于《SCP: Secret Laboratory》C.A.S.S.I.E. 语音系统的语音拼接工具。**
 
 ---
 
