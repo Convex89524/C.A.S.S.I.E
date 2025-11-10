@@ -23,7 +23,7 @@ C.A.S.S.I.E Sentence Builder 是一个基于 **C#、WinForms、NAudio** 的语�
 - NAudio
 - NVorbis
 ---
-## 功能特性 / Features
+## 功能特性
 
 - 支持 **OGG 音频拼接**（自动匹配文件夹中的单词）
 - 可调参数：
