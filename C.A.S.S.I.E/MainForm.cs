@@ -6,7 +6,7 @@ using System.Linq;
 using System.Windows.Forms;
 
 namespace C.A.S.S.I.E
-{
+{ 
     public class MainForm : Form
     {
         private TextBox txtFolder;
