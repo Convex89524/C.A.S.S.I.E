@@ -19,7 +19,10 @@ C.A.S.S.I.E Sentence Builder 是一个基于 **C#、WinForms、NAudio** 的语�
 适合 **SCP:SL 语音生成、C.A.S.S.I.E 模拟器** 等项目使用。
 
 ---
-
+## 所使用的库
+- NAudio
+- NVorbis
+---
 ## 功能特性 / Features
 
 - 支持 **OGG 音频拼接**（自动匹配文件夹中的单词）
