@@ -18,7 +18,8 @@ namespace C.A.S.S.I.E
             float pitchSemitones,
             float overlapMs,
             float voiceDelayMs,
-            float reverbLevel)
+            float reverbLevel,
+            bool enableBackground)
         {
             if (words == null || words.Length == 0)
                 throw new ArgumentException("words 不能为空");
@@ -35,7 +36,7 @@ namespace C.A.S.S.I.E
 
             double totalSeconds;
             float[] finalSamples = MixWithBackground(
-                folder, speechSamples, baseFormat, voiceDelayMs, out totalSeconds);
+                folder, speechSamples, baseFormat, voiceDelayMs, enableBackground, out totalSeconds);
 
             float[] withReverb = ApplyReverbTail(finalSamples, baseFormat, reverbLevel);
 
@@ -62,7 +63,8 @@ namespace C.A.S.S.I.E
             float pitchSemitones,
             float overlapMs,
             float voiceDelayMs,
-            float reverbLevel)
+            float reverbLevel,
+            bool enableBackground)
         {
             if (words == null || words.Length == 0)
                 throw new ArgumentException("单词列表为空。");
@@ -79,7 +81,7 @@ namespace C.A.S.S.I.E
 
             double totalSeconds;
             float[] finalSamples = MixWithBackground(
-                folder, speechSamples, baseFormat, voiceDelayMs, out totalSeconds);
+                folder, speechSamples, baseFormat, voiceDelayMs, enableBackground, out totalSeconds);
 
             float[] withReverb = ApplyReverbTail(finalSamples, baseFormat, reverbLevel);
 
@@ -172,6 +174,7 @@ namespace C.A.S.S.I.E
             float[] speechSamples,
             WaveFormat baseFormat,
             float voiceDelayMs,
+            bool enableBackground,
             out double totalSeconds)
         {
             int sampleRate = baseFormat.SampleRate;
@@ -190,10 +193,18 @@ namespace C.A.S.S.I.E
 
             totalSeconds = total;
 
+            int delaySamplesOnly = (int)(voiceDelayMs / 1000.0 * sampleRate * channels);
+
+            if (!enableBackground)
+            {
+                float[] result = new float[delaySamplesOnly + speechSamples.Length];
+                Array.Copy(speechSamples, 0, result, delaySamplesOnly, speechSamples.Length);
+                return result;
+            }
+
             string bgPath = SelectBgFile(folder, total);
             if (bgPath == null || !File.Exists(bgPath))
             {
-                int delaySamplesOnly = (int)(voiceDelayMs / 1000.0 * sampleRate * channels);
                 float[] result = new float[delaySamplesOnly + speechSamples.Length];
                 Array.Copy(speechSamples, 0, result, delaySamplesOnly, speechSamples.Length);
                 return result;
@@ -209,12 +220,11 @@ namespace C.A.S.S.I.E
                     $"语音: {sampleRate}Hz/{channels}ch");
             }
 
-            int delaySamples = (int)(voiceDelayMs / 1000.0 * sampleRate * channels);
+            int delaySamples = delaySamplesOnly;
             int totalSamples = Math.Max(bgSamples.Length, speechSamples.Length + delaySamples);
 
             float[] mixed = new float[totalSamples];
 
-            // 先写入 BG
             int bgLen = Math.Min(bgSamples.Length, totalSamples);
             for (int i = 0; i < bgLen; i++)
             {

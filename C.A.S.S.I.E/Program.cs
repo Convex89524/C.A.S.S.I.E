@@ -14,6 +14,8 @@ namespace C.A.S.S.I.E
 
         const int SW_HIDE = 0;
         const int SW_SHOW = 5;
+        
+        public static Version Version = new Version("1.0.1");
 
         [STAThread]
         static void Main()
